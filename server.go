@@ -3,30 +3,59 @@ package main
 import (
 	"fmt"
 	"net"
+	"sync"
 )
 
 type Server struct {
 	Ip   string
 	Port int
+	//online user map
+	OnlineMap map[string]*User
+	mapLock   sync.RWMutex
+
+	//message publisher
+	Message chan string
 }
 
-// 构造函数
 func NewServer(ip string, port int) *Server {
 	server := &Server{
-		Ip:   ip,
-		Port: port,
+		Ip:        ip,
+		Port:      port,
+		OnlineMap: make(map[string]*User),
+		Message:   make(chan string),
 	}
 
 	return server
 }
 
-// 回调接口，当前链接的业务
+// 监听Message
+func (this *Server) ListenMessager() {
+	for {
+		msg := <-this.Message
+		this.mapLock.Lock()
+		for _, cli := range this.OnlineMap {
+			cli.C <- msg
+		}
+		this.mapLock.Unlock()
+	}
+}
+func (this *Server) BroadCast(user *User, msg string) {
+	sendMsg := "[" + user.Addr + "]" + user.Name + ":" + msg
+	this.Message <- sendMsg
+}
+
 func (this *Server) Handler(conn net.Conn) {
-	fmt.Println("链接建立成功")
+	//用户上线，加入到online map中
+	user := NewUser(conn)
+	this.mapLock.Lock()
+	this.OnlineMap[user.Name] = user
+	this.mapLock.Unlock()
+
+	//广播当前用户上线消息
+	this.BroadCast(user, "已上线")
 
 }
 
-// 服务器启动的接口
 func (this *Server) Start() {
 	// socket listen
 	listener, err := net.Listen("tcp", fmt.Sprintf("%s:%d", this.Ip, this.Port))
@@ -35,7 +64,10 @@ func (this *Server) Start() {
 		return
 	}
 
+	//close listen socket
 	defer listener.Close()
+
+	go this.ListenMessager()
 
 	for {
 		//accept
@@ -48,7 +80,5 @@ func (this *Server) Start() {
 		//do handler
 		go this.Handler(conn)
 	}
-
-	//close listen socket
 
 }
