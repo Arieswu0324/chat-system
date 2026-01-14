@@ -5,6 +5,7 @@ import (
 	"io"
 	"net"
 	"sync"
+	"time"
 )
 
 type Server struct {
@@ -49,6 +50,7 @@ func (this *Server) Handler(conn net.Conn) {
 	//用户上线，加入到online map中
 	user := NewUser(conn, this)
 	user.Online()
+	isLive := make(chan bool)
 
 	//接收客户端发送的消息
 	go func() {
@@ -69,8 +71,21 @@ func (this *Server) Handler(conn net.Conn) {
 			//提取用户消息，去掉\n
 			msg := string(buf[:n-1])
 			user.DoMessage(msg)
+
+			isLive <- true
 		}
 	}()
+
+	for {
+		select {
+		case <-isLive:
+		case <-time.After(time.Second * 10):
+			user.SendMessage("你被踢了")
+			close(user.C)
+			conn.Close()
+			return //与Go.exit有什么区别
+		}
+	}
 }
 
 func (this *Server) Start() {
